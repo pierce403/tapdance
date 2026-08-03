@@ -112,7 +112,7 @@ jobs:
           "$apksigner" verify --verbose --print-certs dist/tapdance.apk | tee dist/apksigner.txt
           (cd dist && sha256sum tapdance.apk > tapdance.apk.sha256)
           (cd dist && sha256sum -c tapdance.apk.sha256)
-          signer="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' dist/apksigner.txt | head -1)"
+          signer="$(awk -F': ' '/certificate SHA-256 digest:/ {print $NF; exit}' dist/apksigner.txt)"
           test -n "$signer"
           printf '%s\n' "$signer" > dist/tapdance.apk.cert-sha256
           cp RELEASE_NOTES.md dist/release-notes.md
