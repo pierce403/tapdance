@@ -16,6 +16,9 @@ This is an alpha build distributed outside the Play Store. Android may ask you t
 installs from your browser or file manager; grant that permission only for the installation,
 then turn it off again.
 
+Each alpha release uses an ephemeral CI signing key. To install a newer alpha, uninstall the
+older one first; Android will not accept it as an in-place update. TapDance stores no app data.
+
 ## Use
 
 1. Open TapDance and read the visible attempt-counter warning.
@@ -65,13 +68,15 @@ The unit tests replay the official NXP authentication vector and cover explicit 
 Android-hidden NAK/I/O failure, altered proofs, malformed frames, and target-chip rejection.
 
 GitHub Actions runs lint, tests, and a release build on every push and pull request. A trusted
-push to `main` also publishes a checksummed APK, build-provenance attestation, GitHub Release,
-and GitHub Pages artifact.
+push to `main` that changes `VERSION` or `VERSION_CODE` also publishes a checksummed APK,
+build-provenance attestation, GitHub Release, and GitHub Pages artifact. Release changes must
+bump both files; ordinary code and documentation pushes run CI without mutating a release.
 
 ## Security and authorization
 
 Use TapDance only on tags you own or have explicit permission to test. Read
-[SECURITY.md](SECURITY.md) for the alpha-signing model and vulnerability-reporting guidance.
+[SECURITY.md](SECURITY.md) for the build-specific alpha-signing model and vulnerability-
+reporting guidance.
 
 MIT licensed. TapDance is independent and is not affiliated with NXP, Flipper Devices, or any
 access-control vendor.

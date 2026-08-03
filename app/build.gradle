@@ -1,0 +1,51 @@
+plugins {
+    id "com.android.application"
+}
+
+def appVersionName = providers.gradleProperty("tapdanceVersionName")
+        .getOrElse(rootProject.file("VERSION").text.trim())
+def appVersionCode = providers.gradleProperty("tapdanceVersionCode")
+        .getOrElse(rootProject.file("VERSION_CODE").text.trim()).toInteger()
+
+android {
+    namespace "tech.titor.tapdance"
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "tech.titor.tapdance.alpha"
+        minSdk 26
+        targetSdk 35
+        versionCode appVersionCode
+        versionName appVersionName
+
+        testInstrumentationRunner "android.test.InstrumentationTestRunner"
+    }
+
+    buildTypes {
+        release {
+            // Alpha builds use the runner's ephemeral key. See SECURITY.md.
+            signingConfig signingConfigs.debug
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    lint {
+        abortOnError true
+        disable "OldTargetApi"
+    }
+
+    testOptions {
+        unitTests.returnDefaultValues = true
+    }
+}
+
+dependencies {
+    testImplementation "junit:junit:4.13.2"
+}
