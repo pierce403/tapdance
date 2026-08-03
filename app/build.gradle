@@ -11,6 +11,10 @@ android {
     namespace "tech.titor.tapdance"
     compileSdk 35
 
+    buildFeatures {
+        buildConfig true
+    }
+
     defaultConfig {
         applicationId "tech.titor.tapdance.alpha"
         minSdk 26

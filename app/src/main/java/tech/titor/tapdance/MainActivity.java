@@ -2,6 +2,10 @@ package tech.titor.tapdance;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.ClipData;
+import android.content.ClipDescription;
+import android.content.ClipboardManager;
+import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -10,6 +14,7 @@ import android.nfc.Tag;
 import android.nfc.tech.NfcA;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.PersistableBundle;
 import android.view.Gravity;
 import android.view.HapticFeedbackConstants;
 import android.view.View;
@@ -20,6 +25,7 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.Space;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import java.io.IOException;
 import java.security.SecureRandom;
@@ -29,10 +35,14 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 import tech.titor.tapdance.nfc.AuthenticationResult;
+import tech.titor.tapdance.nfc.DiagnosticReport;
 import tech.titor.tapdance.nfc.Hex;
+import tech.titor.tapdance.nfc.RecordingByteTransceiver;
 import tech.titor.tapdance.nfc.UltralightAesAuthenticator;
 
 public final class MainActivity extends Activity implements NfcAdapter.ReaderCallback {
+    private static final int NFC_TIMEOUT_MILLIS = 1000;
+    private static final int PRESENCE_CHECK_DELAY_MILLIS = 250;
     private static final int BG = Color.rgb(9, 9, 11);
     private static final int PANEL = Color.rgb(23, 23, 28);
     private static final int PANEL_ALT = Color.rgb(31, 29, 39);
@@ -47,6 +57,7 @@ public final class MainActivity extends Activity implements NfcAdapter.ReaderCal
     private final AtomicBoolean armed = new AtomicBoolean(false);
     private final AtomicBoolean busy = new AtomicBoolean(false);
     private final AtomicLong attemptGeneration = new AtomicLong();
+    private final AtomicLong closeRequestedAttempt = new AtomicLong(Long.MIN_VALUE);
     private final ExecutorService nfcWorker = Executors.newSingleThreadExecutor();
     private final SecureRandom random = new SecureRandom();
 
@@ -58,6 +69,8 @@ public final class MainActivity extends Activity implements NfcAdapter.ReaderCal
     private TextView stateDetail;
     private TextView technicalDetail;
     private Button armButton;
+    private Button diagnosticButton;
+    private String latestDiagnosticReport = "";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -101,9 +114,10 @@ public final class MainActivity extends Activity implements NfcAdapter.ReaderCal
         disarm(false);
         NfcA session = activeNfcA;
         if (session != null) {
+            closeRequestedAttempt.set(armedAttempt);
             try {
                 session.close();
-            } catch (IOException ignored) {
+            } catch (IOException | SecurityException ignored) {
                 // Closing is the documented way to cancel a blocked transceive.
             }
         }
@@ -134,7 +148,11 @@ public final class MainActivity extends Activity implements NfcAdapter.ReaderCal
     }
 
     private void runAuthentication(Tag tag, long attempt) {
+        long startedNanos = System.nanoTime();
         AuthenticationResult result;
+        RecordingByteTransceiver trace = new RecordingByteTransceiver(
+                command -> { throw new IOException("NFC-A session unavailable"); });
+        DiagnosticReport.Metadata metadata = diagnosticMetadata(tag);
         NfcA nfcA = NfcA.get(tag);
         if (nfcA == null) {
             result = AuthenticationResult.of(
@@ -142,11 +160,14 @@ public final class MainActivity extends Activity implements NfcAdapter.ReaderCal
                     "The detected tag does not expose Android's NFC-A interface.",
                     tag.getId(), null);
         } else {
+            metadata.atqa = nfcA.getAtqa();
+            metadata.sak = nfcA.getSak();
+            metadata.maxTransceiveLength = nfcA.getMaxTransceiveLength();
             try {
                 activeNfcA = nfcA;
                 if (!isAttemptActive(attempt)) {
                     result = cancelledBeforeSubmission(tag);
-                } else if (nfcA.getMaxTransceiveLength() < 33) {
+                } else if (metadata.maxTransceiveLength < 33) {
                     result = AuthenticationResult.of(
                             AuthenticationResult.Outcome.UNSUPPORTED,
                             "This phone's NFC controller cannot send the 33-byte authentication "
@@ -154,39 +175,68 @@ public final class MainActivity extends Activity implements NfcAdapter.ReaderCal
                             tag.getId(), null);
                 } else {
                     nfcA.connect();
-                    nfcA.setTimeout(1000);
+                    nfcA.setTimeout(NFC_TIMEOUT_MILLIS);
+                    metadata.timeoutMillis = nfcA.getTimeout();
                     if (!isAttemptActive(attempt)) {
                         result = cancelledBeforeSubmission(tag);
                     } else {
+                        RecordingByteTransceiver activeTrace =
+                                new RecordingByteTransceiver(nfcA::transceive);
+                        trace = activeTrace;
                         result = UltralightAesAuthenticator.testFactoryDataKey(
                                 command -> {
                                     if (!isAttemptActive(attempt)) {
                                         throw new IOException("Test cancelled");
                                     }
-                                    return nfcA.transceive(command);
+                                    return activeTrace.transceive(command);
                                 },
                                 tag.getId(),
                                 random::nextBytes,
                                 () -> !isAttemptActive(attempt));
                     }
                 }
-            } catch (IOException error) {
+            } catch (IOException | SecurityException error) {
+                metadata.sessionErrorType = error.getClass().getName();
+                metadata.sessionErrorMessage = error.getMessage();
                 result = AuthenticationResult.of(
                         AuthenticationResult.Outcome.INCONCLUSIVE,
                         "Communication ended before the authentication exchange completed. "
                                 + "Keep the tag still and try one more deliberate scan.",
                         tag.getId(), null);
             } finally {
+                metadata.cancelledDuringExchange = closeRequestedAttempt.get() == attempt;
+                try {
+                    metadata.connectedAfterExchange = nfcA.isConnected();
+                } catch (SecurityException error) {
+                    metadata.connectedAfterExchange = false;
+                    if (metadata.sessionErrorType.isEmpty()) {
+                        metadata.sessionErrorType = error.getClass().getName();
+                        metadata.sessionErrorMessage = error.getMessage();
+                    }
+                }
                 activeNfcA = null;
                 try {
                     nfcA.close();
-                } catch (IOException ignored) {
+                } catch (IOException | SecurityException ignored) {
                     // The RF session is already over.
                 }
             }
         }
 
-        returnResult(result);
+        metadata.totalDurationNanos = System.nanoTime() - startedNanos;
+        returnResult(result, DiagnosticReport.create(result, trace, metadata));
+    }
+
+    private DiagnosticReport.Metadata diagnosticMetadata(Tag tag) {
+        DiagnosticReport.Metadata metadata = new DiagnosticReport.Metadata();
+        metadata.appVersion = BuildConfig.VERSION_NAME + " (" + BuildConfig.VERSION_CODE + ")";
+        metadata.device = Build.MANUFACTURER + " " + Build.MODEL;
+        metadata.androidVersion = Build.VERSION.RELEASE + " / API " + Build.VERSION.SDK_INT;
+        metadata.buildFingerprint = Build.FINGERPRINT;
+        metadata.technologies = tag.getTechList();
+        metadata.presenceCheckDelayMillis = PRESENCE_CHECK_DELAY_MILLIS;
+        metadata.timeoutMillis = NFC_TIMEOUT_MILLIS;
+        return metadata;
     }
 
     private boolean isAttemptActive(long attempt) {
@@ -201,7 +251,7 @@ public final class MainActivity extends Activity implements NfcAdapter.ReaderCal
                 tag.getId(), null);
     }
 
-    private void returnResult(AuthenticationResult result) {
+    private void returnResult(AuthenticationResult result, DiagnosticReport report) {
         AuthenticationResult finalResult = result;
         runOnUiThread(() -> {
             stopReaderMode();
@@ -209,16 +259,18 @@ public final class MainActivity extends Activity implements NfcAdapter.ReaderCal
             armButton.setEnabled(adapter != null && adapter.isEnabled());
             armButton.setText("Run another one-shot test");
             armButton.setOnClickListener(view -> requestArm());
-            showResult(finalResult);
+            setDiagnosticReport(report.full());
+            showResult(finalResult, report);
             armButton.performHapticFeedback(HapticFeedbackConstants.CONFIRM);
         });
     }
 
-    private void showResult(AuthenticationResult result) {
+    private void showResult(AuthenticationResult result, DiagnosticReport report) {
         String tech = "UID  " + Hex.encodeSpaced(result.uid());
         if (result.version().length > 0) {
             tech += "\nVER  " + Hex.encodeSpaced(result.version());
         }
+        tech += "\n\n" + report.summary();
 
         switch (result.outcome()) {
             case ACCEPTED:
@@ -292,6 +344,18 @@ public final class MainActivity extends Activity implements NfcAdapter.ReaderCal
         technicalDetail.setVisibility(View.GONE);
         stateCard.addView(technicalDetail, margins(matchWrap(), 0, 15, 0, 0));
 
+        diagnosticButton = new Button(this);
+        diagnosticButton.setAllCaps(false);
+        diagnosticButton.setText("View diagnostic report");
+        diagnosticButton.setTextSize(14);
+        diagnosticButton.setTextColor(TEXT);
+        diagnosticButton.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        diagnosticButton.setMinHeight(dp(48));
+        diagnosticButton.setBackground(roundRect(PANEL, 14, Color.rgb(76, 72, 91)));
+        diagnosticButton.setOnClickListener(view -> showDiagnosticReport());
+        diagnosticButton.setVisibility(View.GONE);
+        stateCard.addView(diagnosticButton, margins(matchWrap(), 0, 15, 0, 0));
+
         armButton = new Button(this);
         armButton.setAllCaps(false);
         armButton.setText("Arm one-shot test");
@@ -334,7 +398,8 @@ public final class MainActivity extends Activity implements NfcAdapter.ReaderCal
         privacy.addView(text("LOCAL BY DESIGN", 12, GREEN, Typeface.BOLD));
         privacy.addView(text(
                 "No Internet permission. No analytics. No automatic retries. No write commands. "
-                        + "No NFC data is saved to disk.", 15, TEXT, Typeface.NORMAL),
+                        + "Diagnostic reports stay in memory unless you explicitly copy or share "
+                        + "them.", 15, TEXT, Typeface.NORMAL),
                 margins(matchWrap(), 0, 9, 0, 0));
 
         TextView footer = text("Open source · Independent · Not affiliated with NXP", 12, MUTED,
@@ -369,6 +434,7 @@ public final class MainActivity extends Activity implements NfcAdapter.ReaderCal
 
     private void armConfirmed() {
         if (busy.get() || adapter == null || !adapter.isEnabled()) return;
+        setDiagnosticReport("");
         armedAttempt = attemptGeneration.incrementAndGet();
         armed.set(true);
         startReaderMode();
@@ -399,7 +465,9 @@ public final class MainActivity extends Activity implements NfcAdapter.ReaderCal
     private void startReaderMode() {
         if (adapter == null) return;
         Bundle options = new Bundle();
-        options.putInt(NfcAdapter.EXTRA_READER_PRESENCE_CHECK_DELAY, 250);
+        options.putInt(
+                NfcAdapter.EXTRA_READER_PRESENCE_CHECK_DELAY,
+                PRESENCE_CHECK_DELAY_MILLIS);
         adapter.enableReaderMode(
                 this,
                 this,
@@ -421,6 +489,84 @@ public final class MainActivity extends Activity implements NfcAdapter.ReaderCal
         stateDetail.setText(detail);
         technicalDetail.setText(technical);
         technicalDetail.setVisibility(technical.isEmpty() ? View.GONE : View.VISIBLE);
+    }
+
+    private void setDiagnosticReport(String report) {
+        latestDiagnosticReport = report == null ? "" : report;
+        if (diagnosticButton != null) {
+            diagnosticButton.setVisibility(
+                    latestDiagnosticReport.isEmpty() ? View.GONE : View.VISIBLE);
+        }
+    }
+
+    private void showDiagnosticReport() {
+        if (latestDiagnosticReport.isEmpty()) return;
+        TextView reportView = text(latestDiagnosticReport, 12, TEXT, Typeface.NORMAL);
+        reportView.setTypeface(Typeface.MONOSPACE);
+        reportView.setTextIsSelectable(true);
+        reportView.setPadding(dp(18), dp(12), dp(18), dp(12));
+
+        ScrollView reportScroll = new ScrollView(this);
+        reportScroll.addView(reportView, matchWrap());
+
+        new AlertDialog.Builder(this)
+                .setTitle("One-shot diagnostic report")
+                .setMessage(
+                        "Contains the tag UID, raw authentication frames, and device build "
+                                + "details. Review it before copying or sharing.")
+                .setView(reportScroll)
+                .setNegativeButton("Close", null)
+                .setNeutralButton("Copy", (dialog, which) -> confirmCopyDiagnosticReport())
+                .setPositiveButton("Share…", (dialog, which) -> confirmShareDiagnosticReport())
+                .show();
+    }
+
+    private void confirmCopyDiagnosticReport() {
+        if (latestDiagnosticReport.isEmpty()) return;
+        new AlertDialog.Builder(this)
+                .setTitle("Copy NFC diagnostics?")
+                .setMessage(
+                        "This report contains the tag UID, raw authentication frames, and device "
+                                + "build details. Your keyboard, clipboard history, or synced "
+                                + "devices may retain it.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Copy report", (dialog, which) -> copyDiagnosticReport())
+                .show();
+    }
+
+    private void copyDiagnosticReport() {
+        ClipboardManager clipboard =
+                (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+        if (clipboard == null || latestDiagnosticReport.isEmpty()) return;
+        ClipData reportClip = ClipData.newPlainText(
+                "TapDance diagnostic report", latestDiagnosticReport);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            PersistableBundle extras = new PersistableBundle();
+            extras.putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true);
+            reportClip.getDescription().setExtras(extras);
+        }
+        clipboard.setPrimaryClip(reportClip);
+        Toast.makeText(this, "Diagnostic report copied", Toast.LENGTH_SHORT).show();
+    }
+
+    private void confirmShareDiagnosticReport() {
+        if (latestDiagnosticReport.isEmpty()) return;
+        new AlertDialog.Builder(this)
+                .setTitle("Share NFC diagnostics?")
+                .setMessage(
+                        "This report contains the tag UID, raw authentication frames, and device "
+                                + "build details. The receiving app may transmit or retain it.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Choose app", (dialog, which) -> shareDiagnosticReport())
+                .show();
+    }
+
+    private void shareDiagnosticReport() {
+        Intent send = new Intent(Intent.ACTION_SEND);
+        send.setType("text/plain");
+        send.putExtra(Intent.EXTRA_SUBJECT, "TapDance NFC diagnostic report");
+        send.putExtra(Intent.EXTRA_TEXT, latestDiagnosticReport);
+        startActivity(Intent.createChooser(send, "Share TapDance diagnostics"));
     }
 
     private LinearLayout column() {

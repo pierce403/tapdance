@@ -31,6 +31,11 @@ older one first; Android will not accept it as an in-place update. TapDance stor
      short NAK response as a generic I/O failure, so TapDance does not turn that into a false
      cryptographic claim.
 
+After a scan, tap **View diagnostic report** to inspect the exact terminal phase, Android-exposed
+frames, transceive timing, connection state, NFC capabilities, and exception type. The report
+exists only in memory unless you explicitly copy or share it. Copying or sharing can disclose the
+tag UID, encrypted authentication frames, and device build details.
+
 TapDance never retries automatically. A failed authentication can still advance a tag's
 configured `AUTH_LIM` counter; at its threshold, protected data may become permanently
 unauthenticatable. Do not repeat the test blindly.
@@ -50,11 +55,24 @@ AF || E(RndA || rotate(RndB)) → 00 || E(rotate(RndA))
 Android's `NfcA` layer adds and checks Type 2 Tag CRC bytes. The app sends no read-memory or
 write-memory command. The manifest intentionally contains no `INTERNET` permission.
 
+Stock AOSP recognizes a four-bit Type 2 NAK below the public API, reconnects the tag, and returns
+no response payload to the app. The framework then surfaces the failure as a generic
+`IOException("Transceive failed")`. A fast proof-stage failure with the NFC-A link still reported
+connected is therefore **strongly consistent** with a hidden wrong-key NAK, but it is not
+cryptographic proof and remains **Inconclusive**. `TagLostException` is reported separately as RF
+loss.
+
+For a deeper controller-level capture on supported Pixel builds, enable the NFC stack debug,
+verbose vendor, and unfiltered NCI logging options in Developer options, reboot, make one armed
+test, and immediately collect an Android bug report. Those logs can contain sensitive nearby NFC
+traffic; review them before sharing.
+
 Protocol references:
 
 - [NXP MF0AES(H)20 data sheet](https://www.nxp.com/docs/en/data-sheet/MF0AES%28H%2920.pdf)
 - [NXP AN13452 authentication example](https://www.nxp.com/docs/en/application-note/AN13452.pdf)
 - [Android `NfcA` API](https://developer.android.com/reference/android/nfc/tech/NfcA)
+- [AOSP Type 2 NAK handling](https://android.googlesource.com/platform/packages/apps/Nfc/+/refs/tags/android-security-15.0.0_r6/nci/jni/NativeNfcTag.cpp#857)
 
 ## Build and test
 
@@ -65,7 +83,8 @@ Requirements: JDK 17 and the Android SDK.
 ```
 
 The unit tests replay the official NXP authentication vector and cover explicit rejection,
-Android-hidden NAK/I/O failure, altered proofs, malformed frames, and target-chip rejection.
+Android-hidden NAK/I/O failure, altered proofs, malformed frames, target-chip rejection, exact
+one-shot exchange recording, defensive copies, and diagnostic interpretation.
 
 GitHub Actions runs lint, tests, and a release build on every push and pull request. A trusted
 push to `main` that changes `VERSION` or `VERSION_CODE` also publishes a checksummed APK,

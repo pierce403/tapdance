@@ -45,9 +45,8 @@ Requires JDK 17 and the Android SDK:
 ./gradlew --no-daemon --stacktrace lintRelease testReleaseUnitTest assembleRelease
 ```
 
-The current NFC core and all 14 unit tests compile cleanly with strict Java warnings. GitHub
-Actions is the authoritative full Android build environment when local dependency downloads
-are unavailable.
+The NFC core and unit tests compile with strict Java warnings. GitHub Actions is the authoritative
+full Android build environment when a local Android SDK or dependency downloads are unavailable.
 
 ## Release workflow
 
@@ -65,6 +64,12 @@ are unavailable.
 - Modern `apksigner --print-certs` labels the digest line `V2 Signer`, not always `Signer #1`;
   parse the suffix `certificate SHA-256 digest:` rather than a fixed prefix.
 - Pixel/AOSP NFC often turns a four-bit Type 2 NAK into a generic Java `IOException`.
+- AOSP deliberately recognizes that Type 2 NAK below the app API, reconnects the tag, and returns
+  no payload; `NfcService` then maps the null result to a generic transceive failure. Keep such a
+  proof-stage result **Inconclusive**, though a still-connected link may be described as strongly
+  consistent with a hidden rejection.
+- Diagnostic recording must be passive: record only existing frames, never retry, retain reports
+  in memory, and warn before Android Sharesheet disclosure of UID, frames, or device build data.
 - Target SDK 35 enforces edge-to-edge; preserve the system-bar inset handling.
 
 ## Style and tooling
