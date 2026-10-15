@@ -7,3 +7,8 @@ build/
 captures/
 *.jks
 *.keystore
+
+# Isolated native static publishing
+/cloudflare/node_modules/
+/cloudflare/.wrangler/
+/dist/

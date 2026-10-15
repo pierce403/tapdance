@@ -1,0 +1,11 @@
+{
+  "repository": "pierce403/tapdance",
+  "worker": "tapdance-ninja",
+  "domain": "tapdance.ninja",
+  "branch": "codex/cloudflare-static",
+  "requiredFiles": [
+    "index.html",
+    "tapdance.apk",
+    "tapdance.apk.sha256"
+  ]
+}

@@ -1,0 +1,45 @@
+name: Publish existing release website
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: tapdance-existing-release-site
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Leave new APK releases to the canonical Android pipeline
+        id: plan
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          publish=true
+          if [[ "$GITHUB_EVENT_NAME" == push ]] && [[ "$BEFORE_SHA" =~ ^[a-f0-9]{40}$ ]]; then
+            if git diff --name-only "$BEFORE_SHA" "$GITHUB_SHA" | grep -Eq '^(VERSION|VERSION_CODE)$'; then
+              publish=false
+            fi
+          fi
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+      - name: Build the website with the unchanged published APK
+        if: steps.plan.outputs.publish == 'true'
+        run: node cloudflare/build-current-release.mjs
+      - name: Publish validated output for native Cloudflare Git builds
+        if: steps.plan.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node cloudflare/mirror-native.mjs tmp/cloudflare-current-release

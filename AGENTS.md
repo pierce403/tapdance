@@ -50,7 +50,7 @@ full Android build environment when a local Android SDK or dependency downloads 
 
 ## Release workflow
 
-- Ordinary pushes and pull requests run `.github/workflows/ci.yml` only.
+- Ordinary main pushes run Android CI plus the existing-release static website workflow; pull requests run CI. Version-changing commits leave APK publication to the canonical Android release pipeline.
 - A release requires changing **both** `VERSION` and `VERSION_CODE` in the same commit.
 - `.github/workflows/android.yml` builds the exact release APK once, verifies its signature,
   hashes and attests it, then supplies byte-identical files to Releases and Pages.
@@ -77,3 +77,18 @@ full Android build environment when a local Android SDK or dependency downloads 
 Prefer small, inspectable changes and primary protocol/platform sources. Keep the app and site
 dependency-light, local-first, accessible, and explicit about trade-offs. These conventions
 adapt the useful repository-etiquette ideas from <https://recurse.bot> to TapDance.
+
+## Native Cloudflare website publishing
+
+The canonical public build keeps its existing validation and Pages recovery.
+Only after that artifact is validated (and releases published where required),
+a repository-only CI token mirrors its public bytes into codex/cloudflare-static.
+Cloudflare native Git builds publish that branch from /cloudflare; credentials
+stay in Cloudflare and previews are off. Source main and generated publication
+commits are separate identities. A stale-main check and non-forced branch update
+prevent older CI output from replacing newer source. No runtime, benchmark,
+firmware, APK, or signing behavior is changed by this hosting-only migration.
+Usage uses zone request metrics with no browser analytics.
+
+Keep code changes on main. The generated branch is public output only, not a
+source development branch. Never bypass canonical release or score gates.
