@@ -1,0 +1,35 @@
+{
+  "repository": "pierce403/tapdance",
+  "sourceRevision": "518942cb67f0dce352b2222732b593b3a574ecff",
+  "branch": "codex/cloudflare-static",
+  "workflow": "pierce403/tapdance/.github/workflows/site.yml@refs/heads/main",
+  "runId": "38664973054",
+  "runAttempt": "1",
+  "files": [
+    {
+      "path": ".nojekyll",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "index.html",
+      "bytes": 17707,
+      "sha256": "436e630344e0c5ac8d12f4925a3ffc16e955617ef13117e27d9e8adaf7eb7442"
+    },
+    {
+      "path": "tapdance.apk",
+      "bytes": 23828,
+      "sha256": "7b80b21de31c0e2b680bd9e57b37fd6218918e708e67dbfc3b5aee6fdb1570fc"
+    },
+    {
+      "path": "tapdance.apk.cert-sha256",
+      "bytes": 65,
+      "sha256": "d4cb2408486e539ceaa5971c8e0c2f0860e775e1d2d616ce034d868eb7931140"
+    },
+    {
+      "path": "tapdance.apk.sha256",
+      "bytes": 79,
+      "sha256": "33cfab9ffa9e7e42f957ed96110e8772dac757e5df1c91ab5ead232b1a7918a7"
+    }
+  ]
+}
