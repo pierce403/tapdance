@@ -97,7 +97,7 @@ Use TapDance only on tags you own or have explicit permission to test. Read
 [SECURITY.md](SECURITY.md) for the build-specific alpha-signing model and vulnerability-
 reporting guidance.
 
-MIT licensed. TapDance is independent and is not affiliated with NXP, Flipper Devices, or any
+Apache-2.0 licensed. TapDance is independent and is not affiliated with NXP, Flipper Devices, or any
 access-control vendor.
 
 ## Native Cloudflare website publishing
@@ -117,3 +117,9 @@ a matching source revision (or the canonical FrogAlert metadata-child receipt),
 then verifies all public hashes. Missing/failed canonical output stops deployment
 and retains the working version. The generated branch distributes public build
 input only. No GitHub lookup is added to the deployed website.
+
+## Licensing scope
+
+Original project code and documentation are licensed under the [Apache License, Version 2.0](LICENSE). Third-party dependencies, vendored code, quoted material, data, fonts, media, and other third-party assets retain their respective licenses and rights; this grant does not relicense them. Existing license notices and attribution must be preserved.
+
+Earlier MIT grants remain valid; the previous license text is preserved in [LICENSE-MIT](LICENSE-MIT).
